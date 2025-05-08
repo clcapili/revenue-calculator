@@ -1,10 +1,9 @@
 const doughnutLabelsLine = {
 	id: "doughnutLabelsLine",
 	afterDraw(chart) {
-		const {
-			ctx,
-			chartArea: { width, height },
-		} = chart;
+		// Get the current viewport width
+		const viewportWidth = window.innerWidth;
+		const {ctx, chartArea: { width, height }} = chart;
 
 		const meta = chart.getDatasetMeta(0); // Get the first dataset meta
 		if (!meta) return;
@@ -12,8 +11,6 @@ const doughnutLabelsLine = {
 		const cx = width / 2;
 		const cy = height / 2;
 		const sum = chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
-
-		const maxLabelWidth = 90; // Maximum width for each label (adjustable)
 
 		meta.data.forEach((datapoint, index) => {
 			const { x: a, y: b, startAngle, endAngle } = datapoint;
@@ -24,32 +21,15 @@ const doughnutLabelsLine = {
 			// Calculate the radius at the outer edge of the segment
 			const outerRadius = datapoint.outerRadius;
 
-			// Adjusted radius for positioning text inside the doughnut
-			const radius = outerRadius - 50; // Move text further inside the doughnut to avoid overlap with lines
+			// Adjust offset based on viewport width
+			const offsetPercentage = viewportWidth < 768 ? 0.25 : 0.35; // Less offset on mobile
+			const minOffset = viewportWidth < 768 ? 10 : 15; // Smaller minimum offset on mobile
+			const maxOffset = viewportWidth < 768 ? 30 : 50; // Smaller maximum offset on mobile
+			const dynamicOffset = Math.min(maxOffset, Math.max(minOffset, outerRadius * offsetPercentage));
+			const radius = outerRadius - dynamicOffset;
+
 			const xPos = cx + radius * Math.cos(angle);
 			const yPos = cy + radius * Math.sin(angle);
-
-			// Adjusted radius for positioning the line
-			const labelLineRadius = outerRadius + 20; // Increase space between the outer edge and the line to prevent overlap
-			const xLine = cx + labelLineRadius * Math.cos(angle);
-			const yLine = cy + labelLineRadius * Math.sin(angle);
-
-			// Modify the line's starting position inside the doughnut to prevent overlap with the text
-			const innerLabelLineRadius = outerRadius - 1; // Decrease the radius to shorten the line inside the doughnut
-			const xInnerLine = cx + innerLabelLineRadius * Math.cos(angle);
-			const yInnerLine = cy + innerLabelLineRadius * Math.sin(angle);
-
-			// Draw the label line from the segment edge to the label
-			const extraLine = xPos >= cx ? 20 : -5; // Increase the line length for more space
-
-			// Draw the line from the inner part of the segment
-			ctx.beginPath();
-			ctx.moveTo(xInnerLine, yInnerLine); // Start at the inner part of the segment
-			ctx.lineTo(xLine, yLine); // Draw the line from segment edge to label
-			ctx.lineTo(xLine + extraLine, yLine); // Add extra length for label positioning
-			ctx.strokeStyle = 'black';
-			ctx.lineWidth = 0.865385;
-			ctx.stroke();
 
 			// Choose text color based on the segment color
 			const segmentColor = chart.data.datasets[0].backgroundColor[index];
@@ -57,46 +37,6 @@ const doughnutLabelsLine = {
 			if (segmentColor === '#6C18C9') {
 				textColor = 'white'; // Use white text for the purple segment
 			}
-
-			// Draw the label outside the chart (beside the lines)
-			ctx.font = '12px Runda';
-			ctx.fillStyle = '#070545';
-
-			// Function to break text into multiple lines if it exceeds max width
-			const breakText = (text, maxWidth) => {
-				let lines = [];
-				let currentLine = '';
-				const words = text.split(' ');
-
-				words.forEach((word) => {
-					const testLine = currentLine + (currentLine ? ' ' : '') + word;
-					const lineWidth = ctx.measureText(testLine).width;
-
-					if (lineWidth <= maxWidth) {
-						currentLine = testLine;
-					} else {
-						lines.push(currentLine);
-						currentLine = word;
-					}
-				});
-
-				lines.push(currentLine); // Add the last line
-				return lines;
-			};
-
-			const labelLines = breakText(chart.data.labels[index], maxLabelWidth);
-
-			// Draw the label lines, spaced vertically
-			const labelOffset = 50; // Increase the offset for more space
-			const lineHeight = 16; // Height between lines of text
-
-			labelLines.forEach((line, i) => {
-				ctx.fillText(
-					line,
-					xLine + extraLine + (xPos >= cx ? labelOffset : -labelOffset),
-					yLine + i * lineHeight // Adjust vertical spacing for multiple lines
-				);
-			});
 
 			// Display percentage inside the doughnut segment, with a slightly reduced radius
 			const percentage = `${(
@@ -114,6 +54,51 @@ const doughnutLabelsLine = {
 	},
 };
 
+const htmlLegendPlugin = {
+	id: 'htmlLegend',
+
+	afterUpdate(chart, args, options) {
+		const legendContainer = document.getElementById(options.containerID);
+        let listContainer = legendContainer.querySelector('ul');
+
+        if (!listContainer) {
+          listContainer = document.createElement('ul');
+          listContainer.className = 'legend-list';
+          legendContainer.appendChild(listContainer);
+        }
+
+		while (listContainer.firstChild) {
+			listContainer.firstChild.remove();
+		}
+
+		const items = chart.options.plugins.legend.labels.generateLabels(chart);
+
+		items.forEach(item => {
+			const legendElement = document.createElement('li');
+			legendElement.className = 'legend-element';
+
+			// color box
+			const legendElementColor = document.createElement('span');
+			legendElementColor.className = 'legend-element-color';
+			legendElementColor.style.backgroundColor = item.fillStyle;
+			legendElementColor.style.borderColor = item.strokeStyle;
+
+			// text
+			const legendElementText = document.createElement('p');
+			legendElementText.className = 'legend-element-text';
+			legendElementText.style.color = item.fontColor;
+			legendElementText.style.textDecoration = item.hidden ? 'line-through' : '';
+
+			const text = document.createTextNode(item.text);
+			legendElementText.appendChild(text);
+
+			legendElement.appendChild(legendElementColor);
+			legendElement.appendChild(legendElementText);
+			listContainer.appendChild(legendElement);
+		});
+	}
+}
+
 class RevenueCalculator {
 	constructor(element, options) {
 		this.element = element;
@@ -123,6 +108,10 @@ class RevenueCalculator {
 		this.initEvents();
 
 		this.chartInstance = null;
+
+		// Add resize handler
+		this.handleResize = this.handleResize.bind(this);
+		window.addEventListener('resize', this.handleResize);
 	}
 
 	initTemplate() {
@@ -154,6 +143,9 @@ class RevenueCalculator {
 			this.calculateRevenueLoss();
 		});
 
+		this.formatBigNumbers(this.annualRevenueInput);
+		this.annualRevenueInput.addEventListener('input', (event) => this.formatBigNumbers(event.target) );
+
 		this.annualRevenueInput.addEventListener('input', () => this.checkFields());
 		this.claimDenialRateInput.addEventListener('input', () => this.checkFields());
 		this.daysInAccountInput.addEventListener('input', () => this.checkFields());
@@ -174,6 +166,13 @@ class RevenueCalculator {
 		}
 	}
 
+	formatBigNumbers(field) {
+		const rawValue = field.value.replace(/\D/g, '');
+		const formatted = new Intl.NumberFormat('en-US').format(rawValue);
+
+		field.value = formatted;        
+	}
+
 	calculateRevenueLoss() {
 		const annualRevenue = parseFloat(this.formatCurrency(this.annualRevenueInput.value));
 		const denialRate = parseFloat(this.formatCurrency(this.claimDenialRateInput.value));
@@ -183,29 +182,22 @@ class RevenueCalculator {
 		const deniedClaimsLoss = annualRevenue * (denialRate / 100);
 		const writeOffLoss = annualRevenue * (writeOffRate / 100);
 		const delayedPaymentsLoss = annualRevenue * (arDays / 365) * 0.05;
-		const totalLoss = Math.round(deniedClaimsLoss + writeOffLoss + delayedPaymentsLoss);
 
-		this.setLostRevenue(totalLoss);
-
-		this.renderChart(deniedClaimsLoss, writeOffLoss, delayedPaymentsLoss, totalLoss);
-	}
-
-	setLostRevenue(totalLoss) {
-		window.totalLoss = totalLoss;
+		this.renderChart(deniedClaimsLoss, writeOffLoss, delayedPaymentsLoss);
 	}
 
 	formatCurrency(value) {
 		return value.replace(/[^0-9.]/g, '');
 	}
 
-	renderChart(deniedClaimsLoss, writeOffLoss, delayedPaymentsLoss, totalLoss) {
+	renderChart(deniedClaimsLoss, writeOffLoss, delayedPaymentsLoss) {
 		const ctx = this.chartContainer.getContext('2d');
 		
 		this.chartContainer.height = 400;
 		this.chartContainer.width = this.chartContainer.clientWidth; 
 	  
 		if (this.chartInstance) {
-		  this.chartInstance.data.datasets[0].data = [deniedClaimsLoss, delayedPaymentsLoss, writeOffLoss];
+		  this.chartInstance.data.datasets[0].data = [deniedClaimsLoss, writeOffLoss, delayedPaymentsLoss];
 		  this.chartInstance.update();
 		} else {
 			this.chartInstance = new Chart(ctx, {
@@ -231,7 +223,10 @@ class RevenueCalculator {
 					},
 					plugins: {
 						legend: {
-							display: false
+							display: false,
+						},
+						htmlLegend: {
+							containerID: 'legend-container'
 						},
 						tooltip: {
 							enabled: false
@@ -240,10 +235,15 @@ class RevenueCalculator {
 							annotations: {
 								dLabel: {
 									type: 'doughnutLabel',
-									content: ({ chart }) => [
-										'Total',
-										'$' + totalLoss.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
-									],
+									content: ({chart}) => { //scriptable option. This will run everytime calling update()
+										const data  = chart.data.datasets[0].data;
+										const total = Math.round(data.reduce((a, b) => a + b, 0));
+										
+										return [
+											'Total',
+											'$' + total.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+										];
+									},
 									font: [
 										{ size: 20, family: 'Runda, sans-serif', weight: 'normal' },
 										{ size: 30, family: 'Runda, sans-serif', weight: 'bold' }
@@ -255,7 +255,7 @@ class RevenueCalculator {
 					}
 				},
 				
-				plugins: [doughnutLabelsLine]
+				plugins: [doughnutLabelsLine, htmlLegendPlugin]
 			});
 		}
 	  
@@ -263,6 +263,20 @@ class RevenueCalculator {
 		  this.chartInstance.resize();
 		}
 	}	  
+
+	handleResize() {
+		// Debounce the resize event for better performance
+		if (this.resizeTimeout) {
+			clearTimeout(this.resizeTimeout);
+		}
+		
+		this.resizeTimeout = setTimeout(() => {
+			if (this.chartInstance) {
+				this.chartInstance.resize();
+				this.chartInstance.update();
+			}
+		}, 250);
+	}
 }
 
 RevenueCalculator.DEFAULTS = {
@@ -275,6 +289,7 @@ RevenueCalculator.DEFAULTS = {
 							<div class="chart-container">
 								<p class="text-center fw-bold">Estimated Revenue Loss</p>
 								<canvas id="lossChart"></canvas>
+								<div id="legend-container"></div>
 							</div>
 						</div>
 
